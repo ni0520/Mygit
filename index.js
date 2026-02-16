@@ -10,4 +10,12 @@ app.get('/', (req, res) => {
   res.render('index', {haikus: haikus});
 });
 
-app.listen(port);
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+if (require.main === module) {
+  app.listen(port);
+}
+
+module.exports = app;
