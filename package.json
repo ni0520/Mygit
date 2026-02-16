@@ -1,20 +1,25 @@
 {
-    "name": "app-service-hello-world",
-    "description": "Simple Hello World Node.js sample for Azure App Service",
-    "version": "0.0.1",
-    "private": true,
-    "license": "MIT",
-    "author": "Microsoft",
-    "scripts": {
-        "start": "node index.js",
-        "dev": "nodemon",
-        "test": "echo \"Error: no test specified\" && exit 1"
-    },
-    "dependencies": {
-        "ejs": "^3.1.10",
-        "express": "^4.21.2"
-    },
-    "devDependencies": {
-        "nodemon": "^2.0.19"
-    }
+  "name": "app-service-hello-world",
+  "description": "Simple Hello World Node.js sample for Azure App Service",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "author": "Microsoft",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "format": "prettier --check \"**/*.{js,json,md,css}\""
+  },
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "eslint": "^9.20.1",
+    "nodemon": "^2.0.19",
+    "prettier": "^3.5.2",
+    "supertest": "^7.0.0"
+  }
 }
