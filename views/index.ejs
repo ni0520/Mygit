@@ -12,13 +12,13 @@
   <body>
     <h1>Haikus for Mona</h1>
     <div>
-      <% for (let i = 0; i < haikus.length; i++) { %>
+      <% for (const [i, { image, text }] of haikus.entries()) { %>
         <img
           class="mona-images"
-          src="images/<%= haikus[i].image %>"
+          src="images/<%= image %>"
           alt="Haiku illustration <%= i + 1 %>" />
         <div class="haiku-containers">
-          <p class="haikus"><%= haikus[i].text %></p>
+          <p class="haikus"><%= text %></p>
         </div>
       <% } %>
     </div>
