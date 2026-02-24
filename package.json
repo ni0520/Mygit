@@ -10,15 +10,18 @@
     "dev": "nodemon index.js",
     "test": "node --test",
     "lint": "eslint .",
-    "format": "prettier --check \"**/*.{js,json,md,css}\""
+    "format": "prettier --check \"**/*.{js,json,md,css}\"",
+    "format:fix": "prettier --write \"**/*.{js,json,md,css}\""
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "ejs": "^3.1.10",
-    "express": "^4.22.1"
+    "express": "^4.22.1",
+    "helmet": "^8.1.0"
   },
   "devDependencies": {
-    "eslint": "^9.20.1",
-    "nodemon": "^2.0.19",
+    "eslint": "^10.0.2",
+    "nodemon": "^3.1.14",
     "prettier": "^3.5.2",
     "supertest": "^7.0.0"
   }

@@ -1,9 +1,13 @@
 const express = require("express");
+const helmet = require("helmet");
+const compression = require("compression");
 
 const app = express();
 const haikus = require("./haikus.json");
 const port = process.env.PORT || 3000;
 
+app.use(helmet());
+app.use(compression());
 app.use(express.static("public", { maxAge: "1d" }));
 app.set("view engine", "ejs");
 
