@@ -1,10 +1,12 @@
 const express = require("express");
+const ejs = require("ejs");
 
 const app = express();
 const haikus = require("./haikus.json");
 const port = process.env.PORT || 3000;
 
 app.use(express.static("public", { maxAge: "1d" }));
+app.engine("ejs", ejs.renderFile);
 app.set("view engine", "ejs");
 
 app.get("/", (req, res) => {
