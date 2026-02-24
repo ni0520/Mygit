@@ -33,3 +33,12 @@ The app exposes `GET /healthz` and returns:
 
 - Haiku text in templates is rendered using escaped output (`<%= ... %>`) to reduce XSS risk.
 - If data sources change from static JSON to user-provided input, perform server-side sanitization/validation before rendering.
+
+## AI Assistant Documentation
+
+This repository includes comprehensive documentation for AI coding assistants:
+
+- **[AI Assistant Guide](.github/AI-ASSISTANT-GUIDE.md)** - Complete guide for AI assistants (Claude Code, GitHub Copilot Workspace, etc.) to execute tasks accurately and completely. Includes code patterns, security requirements, testing guidelines, and task execution checklists.
+- **[GitHub Copilot Instructions](.github/copilot-instructions.md)** - Repository-specific context for GitHub Copilot code suggestions.
+
+These guides ensure AI assistants follow the project's conventions and best practices when assisting with development tasks.
