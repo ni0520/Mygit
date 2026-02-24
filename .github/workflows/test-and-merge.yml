@@ -1,0 +1,240 @@
+# 自動測試與合併工作流
+# PR 創建或更新時自動執行 ESLint 檢查和單元測試
+# 測試通過時自動在 PR 中評論結果
+# 所有檢查通過時自動使用 squash 方式合併 PR
+
+name: 自動測試與合併
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+  # 支持手動觸發
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR 編號（手動觸發時需填寫）'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  test-and-lint:
+    name: 執行測試與 Lint 檢查
+    runs-on: ubuntu-latest
+
+    outputs:
+      lint_status: ${{ steps.lint.outputs.status }}
+      test_status: ${{ steps.test.outputs.status }}
+      lint_output: ${{ steps.lint.outputs.output }}
+      test_output: ${{ steps.test.outputs.output }}
+
+    steps:
+      # 步驟 1：檢出代碼
+      - name: 檢出代碼
+        uses: actions/checkout@v4
+
+      # 步驟 2：設置 Node.js 環境
+      - name: 設置 Node.js 環境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 步驟 3：安裝依賴
+      - name: 安裝依賴
+        run: npm ci
+
+      # 步驟 4：執行 ESLint 檢查
+      - name: 執行 ESLint 檢查
+        id: lint
+        run: |
+          echo "🔍 執行 ESLint 代碼質量檢查..."
+          set +e
+          OUTPUT=$(npm run lint 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          # 截取輸出（避免過長）
+          TRIMMED_OUTPUT=$(echo "$OUTPUT" | head -50)
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$TRIMMED_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ ESLint 檢查通過"
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "❌ ESLint 檢查失敗"
+            echo "$OUTPUT"
+          fi
+
+      # 步驟 5：執行單元測試
+      - name: 執行單元測試
+        id: test
+        run: |
+          echo "🧪 執行單元測試..."
+          set +e
+          OUTPUT=$(npm test 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          # 截取輸出（避免過長）
+          TRIMMED_OUTPUT=$(echo "$OUTPUT" | head -100)
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$TRIMMED_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ 單元測試通過"
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "❌ 單元測試失敗"
+            echo "$OUTPUT"
+          fi
+
+  comment-results:
+    name: 評論測試結果
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      # 步驟 6：在 PR 中評論測試結果
+      - name: 在 PR 中評論測試結果
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const lintStatus = '${{ needs.test-and-lint.outputs.lint_status }}';
+            const testStatus = '${{ needs.test-and-lint.outputs.test_status }}';
+            const lintOutput = `${{ needs.test-and-lint.outputs.lint_output }}`;
+            const testOutput = `${{ needs.test-and-lint.outputs.test_output }}`;
+
+            const lintEmoji = lintStatus === 'success' ? '✅' : '❌';
+            const testEmoji = testStatus === 'success' ? '✅' : '❌';
+            const overallStatus = (lintStatus === 'success' && testStatus === 'success') ? '✅ 全部通過' : '❌ 存在失敗';
+
+            const body = `## 🤖 自動測試結果
+
+            | 檢查項目 | 狀態 |
+            |---------|------|
+            | ESLint 代碼質量 | ${lintEmoji} ${lintStatus === 'success' ? '通過' : '失敗'} |
+            | 單元測試 | ${testEmoji} ${testStatus === 'success' ? '通過' : '失敗'} |
+            | **總體結果** | **${overallStatus}** |
+
+            ${lintStatus !== 'success' ? `### ESLint 輸出\n\`\`\`\n${lintOutput}\n\`\`\`` : ''}
+            ${testStatus !== 'success' ? `### 測試輸出\n\`\`\`\n${testOutput}\n\`\`\`` : ''}
+
+            ---
+            *由 GitHub Actions 自動生成 · ${new Date().toISOString()}*`;
+
+            // 查找已有的 bot 評論並更新，避免重複評論
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('🤖 自動測試結果')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+              console.log('✅ 已更新測試結果評論');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+              console.log('✅ 已創建測試結果評論');
+            }
+
+  auto-merge:
+    name: 自動合併 PR
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' &&
+      needs.test-and-lint.outputs.lint_status == 'success' &&
+      needs.test-and-lint.outputs.test_status == 'success'
+
+    steps:
+      # 步驟 7：所有檢查通過後，自動使用 squash 方式合併 PR
+      - name: 自動 Squash 合併 PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+
+            // 獲取 PR 詳情
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+
+            // 確認 PR 仍然開放
+            if (pr.state !== 'open') {
+              console.log(`ℹ️ PR #${prNumber} 已不是開放狀態（當前：${pr.state}），跳過合併`);
+              return;
+            }
+
+            // 確認 PR 可合併（mergeable 為 null 時表示 GitHub 仍在計算，視為無法合併）
+            if (pr.mergeable === null) {
+              console.log(`ℹ️ PR #${prNumber} 的可合併狀態尚未計算完成，跳過自動合併`);
+              return;
+            }
+            if (!pr.mergeable) {
+              console.log(`⚠️ PR #${prNumber} 存在衝突，無法自動合併`);
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `## ⚠️ 自動合併失敗
+
+            測試雖然通過，但 PR 存在合併衝突，無法自動合併。
+            請手動解決衝突後重新嘗試。`
+              });
+              return;
+            }
+
+            // 執行 squash 合併
+            try {
+              await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                merge_method: 'squash',
+                commit_title: `${pr.title} (#${prNumber})`,
+                commit_message: `由 GitHub Actions 自動合併（squash）
+
+            PR：#${prNumber}
+            作者：@${pr.user.login}
+            合併時間：${new Date().toISOString()}`
+              });
+
+              console.log(`✅ PR #${prNumber} 已成功 squash 合併`);
+            } catch (error) {
+              console.error(`❌ 合併失敗：${error.message}`);
+              throw error;
+            }

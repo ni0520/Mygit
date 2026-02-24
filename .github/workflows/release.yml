@@ -1,0 +1,224 @@
+# 自動版本發布工作流
+# 推送版本標籤（如 v1.0.0）時自動觸發
+# 自動更新 package.json 版本號
+# 自動生成版本變更日誌
+# 自動創建 GitHub Release
+# 自動推送版本號更新到 main 分支
+
+name: 自動版本發布
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  # 支持手動觸發
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本號（如 1.0.0，不含 v 前綴）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: 自動版本發布
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步驟 1：檢出代碼
+      - name: 檢出代碼
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 步驟 2：設置 Node.js 環境
+      - name: 設置 Node.js 環境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 步驟 3：確定版本號
+      - name: 確定版本號
+        id: get-version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            # 從標籤名稱提取版本號（去除 v 前綴）
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "📌 版本號：$VERSION"
+
+      # 步驟 4：安裝依賴
+      - name: 安裝依賴
+        run: npm ci
+
+      # 步驟 5：執行測試確保代碼品質
+      - name: 執行測試
+        run: |
+          echo "🧪 發布前執行測試..."
+          npm test
+          echo "✅ 測試通過"
+
+      # 步驟 6：更新 package.json 版本號
+      - name: 更新 package.json 版本號
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          echo "📝 更新 package.json 版本號到 $VERSION"
+          npm version "$VERSION" --no-git-tag-version
+          echo "✅ package.json 版本已更新為 $VERSION"
+
+      # 步驟 7：生成版本變更日誌
+      - name: 生成版本變更日誌
+        id: changelog
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          TAG="${{ steps.get-version.outputs.tag }}"
+
+          echo "📋 生成版本變更日誌..."
+
+          # 獲取上一個標籤
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^$TAG$" | head -1 || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "ℹ️ 對比範圍：$PREV_TAG → $TAG"
+            COMMIT_RANGE="$PREV_TAG..HEAD"
+          else
+            echo "ℹ️ 首次發布，列出所有提交"
+            COMMIT_RANGE="HEAD"
+          fi
+
+          # 生成提交日誌（按類型分類）
+          FEAT_PATTERN="^- (feat|feature|add|新增|功能)"
+          FIX_PATTERN="^- (fix|bug|修復|修正)"
+          CHORE_PATTERN="^- (chore|refactor|docs|style|test|ci|重構|文檔)"
+
+          FEATURES=$(git log $COMMIT_RANGE --oneline --format="- %s" | grep -iE "$FEAT_PATTERN" || echo "")
+          FIXES=$(git log $COMMIT_RANGE --oneline --format="- %s" | grep -iE "$FIX_PATTERN" || echo "")
+          CHORES=$(git log $COMMIT_RANGE --oneline --format="- %s" | grep -iE "$CHORE_PATTERN" || echo "")
+          OTHER=$(git log $COMMIT_RANGE --oneline --format="- %s" | grep -ivE "$FEAT_PATTERN|$FIX_PATTERN|$CHORE_PATTERN" || echo "")
+
+          # 組合變更日誌
+          CHANGELOG="## 📦 版本 $TAG 發布說明\n\n"
+          CHANGELOG+="**發布時間**：$(date -u '+%Y-%m-%d %H:%M:%S UTC')\n\n"
+
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG+="### ✨ 新功能\n$FEATURES\n\n"
+          fi
+          if [ -n "$FIXES" ]; then
+            CHANGELOG+="### 🐛 Bug 修復\n$FIXES\n\n"
+          fi
+          if [ -n "$CHORES" ]; then
+            CHANGELOG+="### 🔧 其他更新\n$CHORES\n\n"
+          fi
+          if [ -n "$OTHER" ]; then
+            CHANGELOG+="### 📝 其他變更\n$OTHER\n\n"
+          fi
+
+          if [ -z "$FEATURES" ] && [ -z "$FIXES" ] && [ -z "$CHORES" ] && [ -z "$OTHER" ]; then
+            ALL_COMMITS=$(git log $COMMIT_RANGE --oneline --format="- %s (%h)" | head -20)
+            CHANGELOG+="### 📝 提交記錄\n$ALL_COMMITS\n\n"
+          fi
+
+          # 儲存到文件和輸出
+          printf "$CHANGELOG" > /tmp/changelog.md
+          echo "changelog_file=/tmp/changelog.md" >> $GITHUB_OUTPUT
+          echo "✅ 變更日誌生成完成"
+          cat /tmp/changelog.md
+
+      # 步驟 8：提交 package.json 版本更新
+      - name: 提交版本號更新
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          TAG="${{ steps.get-version.outputs.tag }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 確保在 main 分支
+          git checkout main || git checkout -b main origin/main
+
+          # 重新應用版本更新（確保在正確分支）
+          npm version "$VERSION" --no-git-tag-version
+
+          git add package.json package-lock.json
+
+          if git diff --staged --quiet; then
+            echo "ℹ️ package.json 版本未變更，跳過提交"
+          else
+            git commit -m "chore(release): 發布版本 $TAG
+
+          由 GitHub Actions 自動更新版本號
+          版本：$VERSION
+          發布時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+            git push origin main
+            echo "✅ 版本號更新已推送到 main 分支"
+          fi
+
+      # 步驟 9：創建 GitHub Release
+      - name: 創建 GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const version = '${{ steps.get-version.outputs.version }}';
+            const tag = '${{ steps.get-version.outputs.tag }}';
+            const changelogFile = '${{ steps.changelog.outputs.changelog_file }}';
+
+            let changelog = '';
+            try {
+              changelog = fs.readFileSync(changelogFile, 'utf8');
+            } catch (e) {
+              changelog = `## 版本 ${tag} 發布\n\n發布時間：${new Date().toISOString()}`;
+            }
+
+            // 檢查 Release 是否已存在
+            try {
+              const { data: existingRelease } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: tag
+              });
+              console.log(`ℹ️ Release ${tag} 已存在，更新說明`);
+
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: existingRelease.id,
+                body: changelog
+              });
+            } catch (e) {
+              if (e.status === 404) {
+                // 創建新 Release
+                const { data: release } = await github.rest.repos.createRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag_name: tag,
+                  name: `🚀 版本 ${tag}`,
+                  body: changelog,
+                  draft: false,
+                  prerelease: version.includes('-')
+                });
+                console.log(`✅ 已創建 GitHub Release：${release.html_url}`);
+              } else {
+                throw e;
+              }
+            }
+
+      # 步驟 10：輸出發布結果
+      - name: 輸出發布結果
+        run: |
+          echo "🎉 版本 ${{ steps.get-version.outputs.tag }} 發布完成！"
+          echo "  - package.json 版本已更新"
+          echo "  - 變更日誌已生成"
+          echo "  - GitHub Release 已創建"
+          echo "  - 版本更新已推送到 main 分支"

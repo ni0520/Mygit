@@ -1,0 +1,152 @@
+# 自動分支同步工作流
+# main 分支有更新時自動同步到 develop 分支
+# 若 develop 分支不存在則自動創建
+# 合併衝突時創建 PR 提醒手動處理
+
+name: 自動分支同步
+
+on:
+  push:
+    branches:
+      - main
+  # 支持手動觸發
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-to-develop:
+    name: 同步 main 到 develop 分支
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步驟 1：檢出代碼（包含所有分支）
+      - name: 檢出代碼
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 步驟 2：配置 Git 用戶
+      - name: 配置 Git 用戶
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 步驟 3：獲取所有遠端分支信息
+      - name: 獲取遠端分支信息
+        run: git fetch --all
+
+      # 步驟 4：檢查 develop 分支是否存在，不存在則創建
+      - name: 檢查並創建 develop 分支
+        id: check-develop
+        run: |
+          if git ls-remote --exit-code --heads origin develop; then
+            echo "develop_exists=true" >> $GITHUB_OUTPUT
+            echo "ℹ️ develop 分支已存在"
+          else
+            echo "develop_exists=false" >> $GITHUB_OUTPUT
+            echo "📌 develop 分支不存在，將從 main 創建"
+          fi
+
+      - name: 創建 develop 分支（若不存在）
+        if: steps.check-develop.outputs.develop_exists == 'false'
+        run: |
+          git checkout -b develop origin/main
+          git push origin develop
+          echo "✅ 已從 main 創建 develop 分支"
+
+      # 步驟 5：嘗試將 main 合併到 develop
+      - name: 合併 main 到 develop
+        id: merge
+        run: |
+          git checkout develop
+          git pull origin develop
+
+          # 提取提交訊息到變量以提高可讀性
+          MERGE_MSG="chore(sync): 自動同步 main 到 develop
+
+          由 GitHub Actions 自動同步
+          來源提交：${{ github.sha }}
+          觸發時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          # 嘗試合併 main
+          if git merge origin/main --no-edit -m "$MERGE_MSG"; then
+            git push origin develop
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+            echo "✅ 成功將 main 同步到 develop"
+          else
+            git merge --abort
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            echo "⚠️ 合併衝突，將創建 PR 提醒手動處理"
+          fi
+
+      # 步驟 6：若有衝突，創建臨時分支並發起 PR
+      - name: 創建衝突解決分支
+        if: steps.merge.outputs.merge_status == 'conflict'
+        run: |
+          BRANCH="sync/main-to-develop-$(date -u +%Y%m%d-%H%M%S)"
+          echo "CONFLICT_BRANCH=$BRANCH" >> $GITHUB_ENV
+
+          git checkout -b "$BRANCH" origin/main
+          git push origin "$BRANCH"
+          echo "📌 已創建衝突解決分支：$BRANCH"
+
+      - name: 創建衝突解決 PR
+        if: steps.merge.outputs.merge_status == 'conflict'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conflictBranch = process.env.CONFLICT_BRANCH;
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ [需手動處理] 同步 main 到 develop 發生衝突',
+              body: `## ⚠️ 分支同步衝突
+
+            自動同步 \`main\` 到 \`develop\` 時發生合併衝突，需要手動處理。
+
+            ### 衝突信息
+            - 來源分支：\`main\`
+            - 目標分支：\`develop\`
+            - 觸發提交：\`${{ github.sha }}\`
+            - 觸發時間：${new Date().toISOString()}
+
+            ### 解決步驟
+            1. 切換到本地 develop 分支：
+               \`\`\`bash
+               git checkout develop
+               git pull origin develop
+               \`\`\`
+            2. 嘗試合併 main：
+               \`\`\`bash
+               git merge origin/main
+               \`\`\`
+            3. 解決衝突後提交：
+               \`\`\`bash
+               git add .
+               git commit -m "fix: 解決 main 到 develop 的合併衝突"
+               git push origin develop
+               \`\`\`
+            4. 關閉此 PR
+
+            ### 注意
+            請優先解決此衝突，以確保 develop 分支與 main 保持同步。
+            `,
+              head: conflictBranch,
+              base: 'develop'
+            });
+
+            console.log(`⚠️ 已創建衝突解決 PR：#${pr.number} - ${pr.html_url}`);
+
+      # 步驟 7：輸出同步結果
+      - name: 輸出同步結果
+        run: |
+          if [ "${{ steps.merge.outputs.merge_status }}" = "success" ]; then
+            echo "✅ 分支同步成功：main → develop"
+          else
+            echo "⚠️ 分支同步發生衝突，已創建 PR 提醒手動處理"
+          fi
