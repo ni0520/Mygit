@@ -1,0 +1,150 @@
+# 自動依賴更新工作流
+# 每週一上午 10:00 UTC 自動檢查 npm 依賴更新
+# 檢測到新版本時自動創建更新分支並提交 PR
+
+name: 自動依賴更新
+
+on:
+  # 每週一上午 10:00 UTC 自動執行
+  schedule:
+    - cron: '0 10 * * 1'
+  # 支持手動觸發
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-dependencies:
+    name: 檢查並更新 npm 依賴
+    runs-on: ubuntu-latest
+
+    steps:
+      # 步驟 1：檢出代碼
+      - name: 檢出代碼
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 步驟 2：設置 Node.js 環境
+      - name: 設置 Node.js 環境
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 步驟 3：安裝當前依賴
+      - name: 安裝當前依賴
+        run: npm ci
+
+      # 步驟 4：檢查過時的依賴
+      - name: 檢查過時的依賴
+        id: check-outdated
+        run: |
+          OUTDATED=$(npm outdated --json 2>/dev/null || echo '{}')
+          echo "outdated=$OUTDATED" >> $GITHUB_OUTPUT
+          if [ "$OUTDATED" = "{}" ] || [ -z "$OUTDATED" ]; then
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            echo "✅ 所有依賴均為最新版本，無需更新"
+          else
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "📦 發現可更新的依賴："
+            echo "$OUTDATED" | jq -r 'to_entries[] | "  - \(.key): \(.value.current) → \(.value.latest)"'
+          fi
+
+      # 步驟 5：若有更新，切換到更新分支
+      - name: 切換到更新分支
+        if: steps.check-outdated.outputs.has_updates == 'true'
+        run: |
+          BRANCH="dependabot/npm-update"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 若遠端分支已存在則切換，否則新建
+          if git ls-remote --exit-code --heads origin "$BRANCH"; then
+            git checkout -b "$BRANCH" "origin/$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
+
+      # 步驟 6：執行依賴更新
+      - name: 更新依賴到最新版本
+        if: steps.check-outdated.outputs.has_updates == 'true'
+        run: |
+          npm update
+          # 將所有過時依賴更新到最新版本
+          OUTDATED_PKGS=$(npm outdated --json 2>/dev/null | jq -r 'keys[]' | xargs -I{} echo "{}@latest" | tr '\n' ' ')
+          if [ -n "$OUTDATED_PKGS" ]; then
+            npm install $OUTDATED_PKGS || true
+          fi
+
+      # 步驟 7：提交更新並推送分支
+      - name: 提交依賴更新
+        if: steps.check-outdated.outputs.has_updates == 'true'
+        run: |
+          BRANCH="dependabot/npm-update"
+          git add package.json package-lock.json
+
+          # 若有變更才提交
+          if git diff --staged --quiet; then
+            echo "ℹ️ 無文件變更，跳過提交"
+          else
+            git commit -m "chore(deps): 自動更新 npm 依賴至最新版本
+
+          由 GitHub Actions 自動更新
+          觸發時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+            git push origin "$BRANCH" --force
+            echo "✅ 依賴更新已推送到分支 $BRANCH"
+          fi
+
+      # 步驟 8：創建 Pull Request
+      - name: 創建依賴更新 PR
+        if: steps.check-outdated.outputs.has_updates == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = 'dependabot/npm-update';
+            const base = 'main';
+
+            // 檢查是否已有開放的 PR
+            const { data: existingPRs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              base: base,
+              state: 'open'
+            });
+
+            if (existingPRs.length > 0) {
+              console.log(`ℹ️ PR 已存在：#${existingPRs[0].number}，無需重新創建`);
+              return;
+            }
+
+            // 創建新的 PR
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'chore(deps): 自動更新 npm 依賴至最新版本',
+              body: `## 📦 自動依賴更新
+
+            此 PR 由 GitHub Actions 自動生成，用於更新 npm 依賴至最新版本。
+
+            ### 更新內容
+            - 更新所有過時的 npm 依賴
+            - 重新生成 \`package-lock.json\`
+
+            ### 觸發方式
+            - 定時觸發（每週一 10:00 UTC）
+
+            ### 驗證步驟
+            - [ ] 確認測試通過
+            - [ ] 確認應用正常運行
+            `,
+              head: branch,
+              base: base
+            });
+
+            console.log(`✅ 已創建 PR：#${pr.number} - ${pr.html_url}`);
