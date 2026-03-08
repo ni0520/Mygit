@@ -43,15 +43,18 @@ jobs:
       - name: 檢查過時的依賴
         id: check-outdated
         run: |
-          OUTDATED=$(npm outdated --json 2>/dev/null || echo '{}')
-          echo "outdated=$OUTDATED" >> $GITHUB_OUTPUT
-          if [ "$OUTDATED" = "{}" ] || [ -z "$OUTDATED" ]; then
-            echo "has_updates=false" >> $GITHUB_OUTPUT
+          OUTDATED_JSON=$(npm outdated --json 2>/dev/null || echo '{}')
+          OUTDATED_JSON=${OUTDATED_JSON:-{}}
+
+          if [ "$OUTDATED_JSON" = "{}" ]; then
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+            printf 'outdated<<EOF\n%s\nEOF\n' "{}" >> "$GITHUB_OUTPUT"
             echo "✅ 所有依賴均為最新版本，無需更新"
           else
-            echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "has_updates=true" >> "$GITHUB_OUTPUT"
+            printf 'outdated<<EOF\n%s\nEOF\n' "$OUTDATED_JSON" >> "$GITHUB_OUTPUT"
             echo "📦 發現可更新的依賴："
-            echo "$OUTDATED" | jq -r 'to_entries[] | "  - \(.key): \(.value.current) → \(.value.latest)"'
+            echo "$OUTDATED_JSON" | jq -r 'to_entries[] | "  - \(.key): \(.value.current) → \(.value.latest)"'
           fi
 
       # 步驟 5：若有更新，切換到更新分支
