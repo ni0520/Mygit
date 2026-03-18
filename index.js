@@ -20,20 +20,20 @@ app.get("/healthz", (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
+  console.error("未處理的錯誤:", err);
 
   if (res.headersSent) {
     return next(err);
   }
 
   return res.status(500).json({
-    error: "internal_server_error",
+    error: "內部伺服器錯誤",
   });
 });
 
 if (require.main === module) {
   app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+    console.log(`伺服器正在連接埠 ${port} 上運行`);
   });
 }
 

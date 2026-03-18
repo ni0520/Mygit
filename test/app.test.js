@@ -9,7 +9,7 @@ test("GET / returns html page", async () => {
 
   assert.equal(response.status, 200);
   assert.match(response.headers["content-type"], /text\/html/);
-  assert.match(response.text, /Haikus for Mona/);
+  assert.match(response.text, /Mona 的俳句/);
 });
 
 test("GET /healthz returns ok status", async () => {
