@@ -15,8 +15,12 @@ app.get("/", (req, res) => {
   res.render("index", { haikus });
 });
 
-app.get("/healthz", (req, res) => {
+app.get("/healthz", (_req, res) => {
   res.status(200).json({ status: "ok" });
+});
+
+app.use((_req, res) => {
+  res.status(404).json({ error: "not_found" });
 });
 
 app.use((err, req, res, next) => {
