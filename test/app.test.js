@@ -38,3 +38,30 @@ test("GET / includes security headers", async () => {
     "x-frame-options header should be present",
   );
 });
+
+test("GET / includes lazy loading for images", async () => {
+  const response = await request(app).get("/");
+
+  assert.equal(response.status, 200);
+  // First image should have eager loading
+  assert.match(response.text, /loading="eager"/);
+  // Other images should have lazy loading
+  assert.match(response.text, /loading="lazy"/);
+});
+
+test("GET / includes preload hint for first image", async () => {
+  const response = await request(app).get("/");
+
+  assert.equal(response.status, 200);
+  // Should have preload link for first image
+  assert.match(response.text, /<link rel="preload" as="image"/);
+});
+
+test("GET /healthz response is cached", async () => {
+  const response1 = await request(app).get("/healthz");
+  const response2 = await request(app).get("/healthz");
+
+  assert.equal(response1.status, 200);
+  assert.equal(response2.status, 200);
+  assert.deepEqual(response1.body, response2.body);
+});
