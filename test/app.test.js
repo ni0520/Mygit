@@ -9,7 +9,7 @@ test("GET / returns html page", async () => {
 
   assert.equal(response.status, 200);
   assert.match(response.headers["content-type"], /text\/html/);
-  assert.match(response.text, /Haikus for Mona/);
+  assert.match(response.text, /給Mona的俳句/);
 });
 
 test("GET /healthz returns ok status", async () => {
@@ -64,4 +64,17 @@ test("GET /healthz response is cached", async () => {
   assert.equal(response1.status, 200);
   assert.equal(response2.status, 200);
   assert.deepEqual(response1.body, response2.body);
+});
+
+test("GET / includes Traditional Chinese haiku content", async () => {
+  const response = await request(app).get("/");
+
+  assert.equal(response.status, 200);
+  // Check for Traditional Chinese haiku text
+  assert.match(response.text, /西雅圖的雨/);
+  assert.match(response.text, /別忘了帶雨傘/);
+  // Check for Traditional Chinese page title
+  assert.match(response.text, /給Mona的俳句/);
+  // Check for proper language attribute
+  assert.match(response.text, /lang="zh-TW"/);
 });

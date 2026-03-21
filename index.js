@@ -32,19 +32,21 @@ if (process.env.NODE_ENV === "production") {
 // Simple response caching middleware for static data
 const cache = new Map();
 
-const cacheMiddleware = (key, ttl = 60000) => (req, res, next) => {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < ttl) {
-    return res.status(cached.status).json(cached.data);
-  }
+const cacheMiddleware =
+  (key, ttl = 60000) =>
+  (req, res, next) => {
+    const cached = cache.get(key);
+    if (cached && Date.now() - cached.timestamp < ttl) {
+      return res.status(cached.status).json(cached.data);
+    }
 
-  const originalJson = res.json.bind(res);
-  res.json = (data) => {
-    cache.set(key, { data, status: res.statusCode, timestamp: Date.now() });
-    return originalJson(data);
+    const originalJson = res.json.bind(res);
+    res.json = (data) => {
+      cache.set(key, { data, status: res.statusCode, timestamp: Date.now() });
+      return originalJson(data);
+    };
+    next();
   };
-  next();
-};
 
 app.get("/", (req, res) => {
   res.render("index", { haikus });
