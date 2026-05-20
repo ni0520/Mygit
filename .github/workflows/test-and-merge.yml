@@ -50,6 +50,27 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # 新增步驟：退出草稿 PR
+      - name: 檢查是否為草稿 PR
+        id: check_draft
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = github.context.payload.pull_request;
+            if (pr.draft) {
+              core.setOutput("is_draft", true);
+              console.log(`此 PR 是草稿狀態: #${pr.number}`);
+            } else {
+              core.setOutput("is_draft", false);
+              console.log(`此 PR 非草稿，準備執行測試: #${pr.number}`);
+            }
+
+      - name: 結束如果是草稿 PR
+        if: steps.check_draft.outputs.is_draft == 'true'
+        run: |
+          echo "不執行，因為此 PR 是草稿狀態。"
+          exit 0
+
       # 步驟 3：安裝依賴
       - name: 安裝依賴
         run: npm ci
