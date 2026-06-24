@@ -1,0 +1,35 @@
+{
+  "name": "Haikus Codespaces App",
+  "url": "https://github.com/ni0520/Mygit",
+  "hook_attributes": {
+    "url": "https://your-domain.com/webhook"
+  },
+  "redirect_url": "https://your-domain.com/auth/callback",
+  "setup_url": "https://your-domain.com/setup",
+  "description": "A GitHub App for managing and deploying the Haikus for Codespaces application with automated CI/CD, code quality checks, and deployment capabilities.",
+  "public": false,
+  "default_permissions": {
+    "contents": "write",
+    "issues": "write",
+    "pull_requests": "write",
+    "workflows": "write",
+    "checks": "write",
+    "statuses": "write",
+    "deployments": "write",
+    "metadata": "read",
+    "pages": "write"
+  },
+  "default_events": [
+    "push",
+    "pull_request",
+    "issues",
+    "issue_comment",
+    "workflow_run",
+    "deployment",
+    "deployment_status",
+    "check_run",
+    "check_suite",
+    "release",
+    "page_build"
+  ]
+}
