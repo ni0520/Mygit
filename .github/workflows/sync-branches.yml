@@ -1,6 +1,5 @@
-# 自動分支同步工作流（第 3 版 - 終極修復）
-# 移除所有環境變數層級，使用直接內聯方式
-# 確保 main 分支成功同步到 develop 分支
+# 自動分支同步工作流 - 簡化版本
+# 採用最基礎的 bash 邏輯，確保最高可靠性
 
 name: 自動分支同步
 
@@ -20,160 +19,90 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 檢出代碼
+      - name: 📥 檢出代碼
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 配置 Git 用戶
+      - name: ⚙️ 配置 Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: 獲取遠端分支信息
-        run: git fetch --all
+      - name: 🔄 拉取所有分支
+        run: |
+          git fetch --all --verbose
 
-      - name: 檢查並創建 develop 分支
+      - name: ✅ 檢查 develop 分支
         id: check-develop
         run: |
-          if git ls-remote --exit-code --heads origin develop >/dev/null 2>&1; then
-            echo "develop_exists=true" >> "$GITHUB_OUTPUT"
-            echo "ℹ️  develop 分支已存在"
+          echo "開始檢查 develop 分支..."
+          if git ls-remote --heads origin develop | grep -q develop; then
+            echo "develop_exists=yes" >> "$GITHUB_OUTPUT"
+            echo "✅ develop 分支已存在"
           else
-            echo "develop_exists=false" >> "$GITHUB_OUTPUT"
-            echo "📌 develop 分支不存在，將從 main 創建"
+            echo "develop_exists=no" >> "$GITHUB_OUTPUT"
+            echo "📌 develop 分支不存在"
           fi
 
-      - name: 創建 develop 分支（若不存在）
-        if: steps.check-develop.outputs.develop_exists == 'false'
+      - name: 🆕 創建 develop 分支（如果不存在）
+        if: steps.check-develop.outputs.develop_exists == 'no'
         run: |
+          echo "正在創建 develop 分支..."
           git checkout -b develop origin/main
-          git push origin develop
-          echo "✅ 已從 main 創建 develop 分支"
+          git push origin develop -v
+          echo "✅ develop 分支已創建"
 
-      - name: 合併 main 到 develop
-        id: merge
+      - name: 🔀 合併 main 到 develop
         run: |
-          set -e  # 任何錯誤立即停止
+          echo "準備合併 main 到 develop..."
           
+          # 切換到 develop 分支
           git checkout develop
-          git pull origin develop
+          echo "已切換到 develop 分支"
           
-          echo "🔄 開始合併 main 到 develop..."
+          # 拉取最新內容
+          git pull origin develop --verbose
+          echo "已拉取最新 develop 內容"
           
-          # 生成時間戳記
-          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
-          
-          # 嘗試合併（直接內聯訊息，避免環境變數問題）
-          if git merge origin/main -m "chore(sync): 自動同步 main 到 develop
-
-由 GitHub Actions 自動同步
-來源提交：${{ github.sha }}
-觸發時間：${TIMESTAMP}"; then
-            echo "✅ 合併成功，準備推送..."
-            git push origin develop
-            echo "merge_status=success" >> "$GITHUB_OUTPUT"
-            echo "✅ develop 分支已同步到最新提交"
+          # 嘗試合併
+          echo "開始合併 main..."
+          if git merge origin/main -m "chore(sync): 自動同步 main 到 develop"; then
+            echo "✅ 合併成功"
+            
+            # 推送到遠端
+            echo "正在推送到遠端..."
+            git push origin develop -v
+            echo "✅ 推送成功"
+            
+            # 標記成功
+            echo "MERGE_SUCCESS=true" >> "$GITHUB_ENV"
           else
-            echo "⚠️ 檢測到合併衝突，中止合併..."
+            echo "⚠️ 合併失敗（可能是衝突）"
             git merge --abort
-            echo "merge_status=conflict" >> "$GITHUB_OUTPUT"
+            echo "MERGE_SUCCESS=false" >> "$GITHUB_ENV"
           fi
 
-      - name: 若有衝突則創建解決分支和 PR
-        if: steps.merge.outputs.merge_status == 'conflict'
-        run: |
-          BRANCH_NAME="sync/main-to-develop-$(date -u +%Y%m%d-%H%M%S)"
-          echo "📌 創建衝突解決分支：$BRANCH_NAME"
-          
-          git checkout -b "$BRANCH_NAME" origin/main
-          git push origin "$BRANCH_NAME"
-          
-          # 保存分支名稱供後續使用
-          echo "conflict_branch=$BRANCH_NAME" >> "$GITHUB_ENV"
-
-      - name: 創建衝突解決 PR
-        if: steps.merge.outputs.merge_status == 'conflict' && env.conflict_branch != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const branch = process.env.conflict_branch;
-            const triggerTime = new Date().toISOString();
-            
-            try {
-              const { data: pr } = await github.rest.pulls.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title: '⚠️ [需手動處理] main → develop 合併衝突',
-                body: `## ⚠️ 分支同步衝突通知
-
-自動同步 \`main\` 到 \`develop\` 時發生合併衝突。
-
-### 衝突詳情
-- 源分支：\`main\`
-- 目標分支：\`develop\`
-- 解決分支：\`${branch}\`
-- 觸發提交：${{ github.sha }}
-- 檢測時間：${triggerTime}
-
-### 解決方案
-
-**推薦方案：本地手動解決**
-\`\`\`bash
-git fetch origin
-git checkout develop
-git pull origin develop
-git merge origin/main
-
-# 編輯衝突文件，解決衝突...
-
-git add .
-git commit -m "fix: 解決 main → develop 合併衝突"
-git push origin develop
-\`\`\`
-
-**或使用自動創建的解決分支**
-基於 \`${branch}\` 進行上述操作。
-
-### 後續步驟
-1. 解決所有衝突後推送到 develop
-2. 此 PR 將自動關閉
-3. 下次 main 推送時工作流將正常執行
-
----
-*由 GitHub Actions 自動生成*`,
-                head: branch,
-                base: 'develop'
-              });
-              
-              console.log(`✅ PR 已創建：#${pr.number}`);
-              console.log(`🔗 URL：${pr.html_url}`);
-            } catch (error) {
-              console.error('❌ PR 創建失敗：', error.message);
-              throw error;
-            }
-
-      - name: 輸出最終結果
+      - name: 📊 輸出結果
         if: always()
         run: |
+          echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📊 分支同步結果"
+          echo "📊 分支同步完成"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
-          if [ "${{ steps.merge.outputs.merge_status }}" = "success" ]; then
+          if [ "$MERGE_SUCCESS" = "true" ]; then
             echo ""
             echo "✅ 狀態：同步成功"
-            echo "📍 操作：main → develop"
-            echo "⏰ 完成時間：${{ steps.merge.outputs.timestamp }}"
-            echo "🔄 develop 已更新到最新提交"
+            echo "📍 已將 main 同步到 develop"
+            echo "⏰ 完成時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
           else
             echo ""
-            echo "⚠️ 狀態：檢測到合併衝突"
-            echo "📌 衝突分支：${{ env.conflict_branch }}"
-            echo "👉 已自動創建 PR，請手動解決衝突"
+            echo "⚠️ 狀態：同步失敗或發生衝突"
+            echo "👉 需要手動解決"
+            echo ""
           fi
           
-          echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
