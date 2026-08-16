@@ -58,35 +58,29 @@ jobs:
           git push origin develop
           echo "✅ 已從 main 創建 develop 分支"
 
-      # 步驟 5：嘗試將 main 合併到 develop
+      # 步驟 5：準備合併訊息（修復版本）
       - name: 準備合併訊息
         id: prepare-merge
         run: |
           # 生成時間戳記
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
           
-          # 建立臨時文件存儲多行訊息（避免 $GITHUB_OUTPUT 格式問題）
-          MERGE_MSG_FILE=$(mktemp)
-          cat > "$MERGE_MSG_FILE" << 'EOF'
-          chore(sync): 自動同步 main 到 develop
+          # 直接使用字符串替換，避免 sed 的特殊字符衝突
+          MERGE_MSG="chore(sync): 自動同步 main 到 develop
           
           由 GitHub Actions 自動同步
           來源提交：${{ github.sha }}
-          觸發時間：{TIMESTAMP}
-          EOF
+          觸發時間：${TIMESTAMP}"
           
-          # 替換時間戳記
-          sed -i "s/{TIMESTAMP}/$TIMESTAMP/" "$MERGE_MSG_FILE"
-          
-          # 將訊息內容存儲為環境變數
-          MERGE_MSG=$(cat "$MERGE_MSG_FILE")
+          # 使用 EOF 分隔符安全地存儲多行訊息
           echo "merge_message<<EOF" >> "$GITHUB_OUTPUT"
           echo "$MERGE_MSG" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
           
-          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
-          rm -f "$MERGE_MSG_FILE"
+          echo "📝 合併訊息已準備完成"
 
+      # 步驟 6：嘗試將 main 合併到 develop
       - name: 合併 main 到 develop
         id: merge
         env:
@@ -106,7 +100,7 @@ jobs:
             echo "⚠️ 合併衝突，將創建 PR 提醒手動處理"
           fi
 
-      # 步驟 6：若有衝突，創建臨時分支並發起 PR
+      # 步驟 7：若有衝突，創建臨時分支並發起 PR
       - name: 創建衝突解決分支
         if: steps.merge.outputs.merge_status == 'conflict'
         id: conflict-branch
@@ -188,14 +182,21 @@ git push origin develop
             console.log(`✅ 已創建衝突解決 PR：#${pr.number}`);
             console.log(`📍 URL：${pr.html_url}`);
 
-      # 步驟 7：輸出同步結果
+      # 步驟 8：輸出同步結果
       - name: 輸出同步結果
         run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 分支同步執行結果"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
           if [ "${{ steps.merge.outputs.merge_status }}" = "success" ]; then
-            echo "✅ 分支同步成功：main → develop"
+            echo "✅ 狀態：分支同步成功"
+            echo "📍 操作：main → develop"
             echo "⏰ 完成時間：${{ steps.prepare-merge.outputs.timestamp }}"
           else
-            echo "⚠️ 分支同步發生衝突"
+            echo "⚠️ 狀態：分支同步發生衝突"
             echo "📌 衝突分支：${{ steps.conflict-branch.outputs.branch_name }}"
-            echo "👉 請查看自動創建的 PR 進行手動解決"
+            echo "👉 操作：已自動創建 PR 進行手動解決"
           fi
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
