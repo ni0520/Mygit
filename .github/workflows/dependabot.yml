@@ -32,40 +32,46 @@ jobs:
       - name: 設置 Node.js 環境
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # 步驟 3：安裝當前依賴
       - name: 安裝當前依賴
         run: npm ci
 
-      # 步驟 4：檢查過時的依賴（修復版本）
+      # 步驟 4：檢查過時的依賴（核心修復）
       - name: 檢查過時的依賴
         id: check-outdated
         run: |
           echo "檢查過時的 npm 依賴..."
           
-          # 使用臨時文件存儲 JSON 輸出
-          OUTDATED_FILE=$(mktemp)
-          npm outdated --json > "$OUTDATED_FILE" 2>/dev/null || echo '{}' > "$OUTDATED_FILE"
+          # 使用臨時文件存儲 JSON，避免直接寫入 $GITHUB_OUTPUT
+          OUTDATED_JSON=$(mktemp)
+          npm outdated --json > "$OUTDATED_JSON" 2>/dev/null || echo '{}' > "$OUTDATED_JSON"
           
-          OUTDATED=$(cat "$OUTDATED_FILE")
+          # 讀取 JSON 內容
+          OUTDATED_DATA=$(cat "$OUTDATED_JSON")
           
-          # 檢查是否有過時依賴
-          if echo "$OUTDATED" | jq -e 'length > 0' > /dev/null 2>&1; then
-            echo "has_updates=true" >> $GITHUB_OUTPUT
-            echo "📦 發現可更新的依賴："
-            echo "$OUTDATED" | jq -r 'to_entries[] | "  - \(.key): \(.value.current) → \(.value.latest)"'
+          # 使用 jq 安全檢查是否有過時包
+          if echo "$OUTDATED_DATA" | jq -e 'length > 0' > /dev/null 2>&1; then
+            # 有過時依賴，設置標誌位
+            echo "has_updates=true" >> "$GITHUB_OUTPUT"
             
-            # 存儲過時包名單為環境變數
-            PACKAGES=$(echo "$OUTDATED" | jq -r 'keys[]' | xargs echo)
-            echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
+            # 安全地提取包名列表（單行格式）
+            PACKAGE_LIST=$(echo "$OUTDATED_DATA" | jq -r 'keys | join(" ")' 2>/dev/null)
+            echo "packages=$PACKAGE_LIST" >> "$GITHUB_OUTPUT"
+            
+            # 顯示過時依賴列表
+            echo "📦 發現可更新的依賴："
+            echo "$OUTDATED_DATA" | jq -r 'to_entries[] | "  - \(.key): \(.value.current) → \(.value.latest)"'
           else
-            echo "has_updates=false" >> $GITHUB_OUTPUT
+            # 無過時依賴
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
             echo "✅ 所有依賴均為最新版本，無需更新"
           fi
           
-          rm -f "$OUTDATED_FILE"
+          # 清理臨時文件
+          rm -f "$OUTDATED_JSON"
 
       # 步驟 5：若有更新，切換到更新分支
       - name: 切換到更新分支
@@ -88,14 +94,17 @@ jobs:
         run: |
           echo "開始更新依賴..."
           
-          # 方法 1: 使用 npm update 進行標準更新
+          # 步驟 6.1：執行標準 npm update
           npm update
           
-          # 方法 2: 針對仍然過時的包進行精確更新
+          # 步驟 6.2：獲取過時包列表並更新到 @latest
           PACKAGES="${{ steps.check-outdated.outputs.packages }}"
           if [ -n "$PACKAGES" ]; then
-            echo "執行精確版本更新..."
-            npm install $(echo "$PACKAGES" | tr ' ' '\n' | sed 's/^/@latest/' | xargs) || true
+            echo "執行精確版本更新到 @latest..."
+            # 將空格分隔的包名轉換為 package@latest 格式
+            for pkg in $PACKAGES; do
+              npm install "$pkg@latest" --save 2>/dev/null || true
+            done
           fi
           
           echo "✅ 依賴更新完成"
@@ -112,7 +121,7 @@ jobs:
             echo "ℹ️ 無文件變更，跳過提交"
           else
             git commit -m "chore(deps): 自動更新 npm 依賴至最新版本
-          
+
           由 GitHub Actions 自動更新
           觸發時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             
