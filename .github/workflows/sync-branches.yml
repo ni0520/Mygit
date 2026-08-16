@@ -1,7 +1,6 @@
-# 自動分支同步工作流
-# main 分支有更新時自動同步到 develop 分支
-# 若 develop 分支不存在則自動創建
-# 合併衝突時創建 PR 提醒手動處理
+# 自動分支同步工作流（第 3 版 - 終極修復）
+# 移除所有環境變數層級，使用直接內聯方式
+# 確保 main 分支成功同步到 develop 分支
 
 name: 自動分支同步
 
@@ -9,7 +8,6 @@ on:
   push:
     branches:
       - main
-  # 支持手動觸發
   workflow_dispatch:
 
 permissions:
@@ -22,30 +20,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 步驟 1：檢出代碼（包含所有分支）
       - name: 檢出代碼
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 步驟 2：配置 Git 用戶
       - name: 配置 Git 用戶
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # 步驟 3：獲取所有遠端分支信息
       - name: 獲取遠端分支信息
         run: git fetch --all
 
-      # 步驟 4：檢查 develop 分支是否存在，不存在則創建
       - name: 檢查並創建 develop 分支
         id: check-develop
         run: |
-          if git ls-remote --exit-code --heads origin develop; then
+          if git ls-remote --exit-code --heads origin develop >/dev/null 2>&1; then
             echo "develop_exists=true" >> "$GITHUB_OUTPUT"
-            echo "ℹ️ develop 分支已存在"
+            echo "ℹ️  develop 分支已存在"
           else
             echo "develop_exists=false" >> "$GITHUB_OUTPUT"
             echo "📌 develop 分支不存在，將從 main 創建"
@@ -58,145 +52,128 @@ jobs:
           git push origin develop
           echo "✅ 已從 main 創建 develop 分支"
 
-      # 步驟 5：準備合併訊息（修復版本）
-      - name: 準備合併訊息
-        id: prepare-merge
+      - name: 合併 main 到 develop
+        id: merge
         run: |
+          set -e  # 任何錯誤立即停止
+          
+          git checkout develop
+          git pull origin develop
+          
+          echo "🔄 開始合併 main 到 develop..."
+          
           # 生成時間戳記
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
           
-          # 直接使用字符串替換，避免 sed 的特殊字符衝突
-          MERGE_MSG="chore(sync): 自動同步 main 到 develop
-          
-          由 GitHub Actions 自動同步
-          來源提交：${{ github.sha }}
-          觸發時間：${TIMESTAMP}"
-          
-          # 使用 EOF 分隔符安全地存儲多行訊息
-          echo "merge_message<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$MERGE_MSG" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-          
-          echo "📝 合併訊息已準備完成"
+          # 嘗試合併（直接內聯訊息，避免環境變數問題）
+          if git merge origin/main -m "chore(sync): 自動同步 main 到 develop
 
-      # 步驟 6：嘗試將 main 合併到 develop
-      - name: 合併 main 到 develop
-        id: merge
-        env:
-          MERGE_MSG: ${{ steps.prepare-merge.outputs.merge_message }}
-        run: |
-          git checkout develop
-          git pull origin develop
-
-          # 嘗試合併 main
-          if git merge origin/main --no-edit -m "$MERGE_MSG"; then
+由 GitHub Actions 自動同步
+來源提交：${{ github.sha }}
+觸發時間：${TIMESTAMP}"; then
+            echo "✅ 合併成功，準備推送..."
             git push origin develop
             echo "merge_status=success" >> "$GITHUB_OUTPUT"
-            echo "✅ 成功將 main 同步到 develop"
+            echo "✅ develop 分支已同步到最新提交"
           else
+            echo "⚠️ 檢測到合併衝突，中止合併..."
             git merge --abort
             echo "merge_status=conflict" >> "$GITHUB_OUTPUT"
-            echo "⚠️ 合併衝突，將創建 PR 提醒手動處理"
           fi
 
-      # 步驟 7：若有衝突，創建臨時分支並發起 PR
-      - name: 創建衝突解決分支
+      - name: 若有衝突則創建解決分支和 PR
         if: steps.merge.outputs.merge_status == 'conflict'
-        id: conflict-branch
         run: |
-          # 使用 ISO 8601 格式的時間戳記，確保唯一性
-          BRANCH="sync/main-to-develop-$(date -u +%Y%m%d-%H%M%S)"
-          echo "branch_name=$BRANCH" >> "$GITHUB_OUTPUT"
-
-          git checkout -b "$BRANCH" origin/main
-          git push origin "$BRANCH"
-          echo "📌 已創建衝突解決分支：$BRANCH"
+          BRANCH_NAME="sync/main-to-develop-$(date -u +%Y%m%d-%H%M%S)"
+          echo "📌 創建衝突解決分支：$BRANCH_NAME"
+          
+          git checkout -b "$BRANCH_NAME" origin/main
+          git push origin "$BRANCH_NAME"
+          
+          # 保存分支名稱供後續使用
+          echo "conflict_branch=$BRANCH_NAME" >> "$GITHUB_ENV"
 
       - name: 創建衝突解決 PR
-        if: steps.merge.outputs.merge_status == 'conflict'
+        if: steps.merge.outputs.merge_status == 'conflict' && env.conflict_branch != ''
         uses: actions/github-script@v7
         with:
           script: |
-            const conflictBranch = '${{ steps.conflict-branch.outputs.branch_name }}';
-            const triggerTime = '${{ steps.prepare-merge.outputs.timestamp }}';
+            const branch = process.env.conflict_branch;
+            const triggerTime = new Date().toISOString();
+            
+            try {
+              const { data: pr } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '⚠️ [需手動處理] main → develop 合併衝突',
+                body: `## ⚠️ 分支同步衝突通知
 
-            // 驗證分支名稱是否正確
-            if (!conflictBranch || conflictBranch.includes('$')) {
-              throw new Error('衝突解決分支名稱為空或包含未替換的變數');
-            }
+自動同步 \`main\` 到 \`develop\` 時發生合併衝突。
 
-            const { data: pr } = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '⚠️ [需手動處理] 同步 main 到 develop 發生衝突',
-              body: `## ⚠️ 分支同步衝突
-
-自動同步 \`main\` 到 \`develop\` 時發生合併衝突，需要手動處理。
-
-### 衝突信息
-- 來源分支：\`main\`
+### 衝突詳情
+- 源分支：\`main\`
 - 目標分支：\`develop\`
-- 衝突解決分支：\`${conflictBranch}\`
-- 觸發提交：\`${{ github.sha }}\`
-- 觸發時間：${triggerTime}
+- 解決分支：\`${branch}\`
+- 觸發提交：${{ github.sha }}
+- 檢測時間：${triggerTime}
 
-### 解決步驟
+### 解決方案
 
-#### 方案 A：在本地解決（推薦）
+**推薦方案：本地手動解決**
 \`\`\`bash
-# 1. 拉取最新代碼
 git fetch origin
-
-# 2. 切換到 develop 分支
 git checkout develop
 git pull origin develop
-
-# 3. 嘗試合併 main
 git merge origin/main
 
-# 4. 編輯衝突文件，解決衝突
+# 編輯衝突文件，解決衝突...
 
-# 5. 提交解決
 git add .
-git commit -m "fix: 解決 main 到 develop 的合併衝突"
-
-# 6. 推送回遠端
+git commit -m "fix: 解決 main → develop 合併衝突"
 git push origin develop
 \`\`\`
 
-#### 方案 B：使用衝突解決分支
-基於此分支 \`${conflictBranch}\` 執行上述步驟 2-6。
+**或使用自動創建的解決分支**
+基於 \`${branch}\` 進行上述操作。
 
-### 注意事項
-⚠️ **請優先處理此衝突**，以確保 develop 分支與 main 保持同步。
-衝突未解決前，後續的 main 更新將無法自動同步到 develop。
+### 後續步驟
+1. 解決所有衝突後推送到 develop
+2. 此 PR 將自動關閉
+3. 下次 main 推送時工作流將正常執行
 
 ---
-*此 PR 由 GitHub Actions 自動生成*
-`,
-              head: conflictBranch,
-              base: 'develop'
-            });
+*由 GitHub Actions 自動生成*`,
+                head: branch,
+                base: 'develop'
+              });
+              
+              console.log(`✅ PR 已創建：#${pr.number}`);
+              console.log(`🔗 URL：${pr.html_url}`);
+            } catch (error) {
+              console.error('❌ PR 創建失敗：', error.message);
+              throw error;
+            }
 
-            console.log(`✅ 已創建衝突解決 PR：#${pr.number}`);
-            console.log(`📍 URL：${pr.html_url}`);
-
-      # 步驟 8：輸出同步結果
-      - name: 輸出同步結果
+      - name: 輸出最終結果
+        if: always()
         run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📊 分支同步執行結果"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 分支同步結果"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
           if [ "${{ steps.merge.outputs.merge_status }}" = "success" ]; then
-            echo "✅ 狀態：分支同步成功"
+            echo ""
+            echo "✅ 狀態：同步成功"
             echo "📍 操作：main → develop"
-            echo "⏰ 完成時間：${{ steps.prepare-merge.outputs.timestamp }}"
+            echo "⏰ 完成時間：${{ steps.merge.outputs.timestamp }}"
+            echo "🔄 develop 已更新到最新提交"
           else
-            echo "⚠️ 狀態：分支同步發生衝突"
-            echo "📌 衝突分支：${{ steps.conflict-branch.outputs.branch_name }}"
-            echo "👉 操作：已自動創建 PR 進行手動解決"
+            echo ""
+            echo "⚠️ 狀態：檢測到合併衝突"
+            echo "📌 衝突分支：${{ env.conflict_branch }}"
+            echo "👉 已自動創建 PR，請手動解決衝突"
           fi
           
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
