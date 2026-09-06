@@ -81,36 +81,70 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: 切換到修復分支
+      - name: 切換到修復分支（改進版）
         if: steps.check-changes.outputs.has_changes == 'true' && github.event_name != 'pull_request'
         run: |
           BRANCH="fix/code-quality-auto-fix"
-          # 暫存修復後的變更
-          git stash
+          BASE_BRANCH="${{ github.ref_name }}"
+          
+          # 1. 獲取當前的修復變更
+          echo "📝 保存當前的修復變更..."
+          git diff > /tmp/current-changes.patch
+          
+          # 2. 重置工作區到乾淨狀態
+          git reset --hard HEAD
+          
+          # 3. 檢查遠端分支是否存在
           if git ls-remote --exit-code --heads origin "$BRANCH"; then
-            git checkout -b "$BRANCH" "origin/$BRANCH"
+            echo "🔄 遠端分支已存在，切換到 $BRANCH..."
+            git fetch origin "$BRANCH"
+            git checkout -b "$BRANCH" "origin/$BRANCH" || git checkout "$BRANCH"
           else
+            echo "✨ 創建新的修復分支 $BRANCH..."
             git checkout -b "$BRANCH"
           fi
-          # 恢復修復後的變更到新分支
-          git stash pop
-          git add .
+          
+          # 4. 應用修復變更
+          echo "✅ 應用修復變更..."
+          git apply /tmp/current-changes.patch || {
+            echo "⚠️ 無法自動應用補丁，嘗試強制應用..."
+            git apply --reject /tmp/current-changes.patch || true
+            # 如果仍有失敗，至少已切換到正確的分支
+          }
+          
+          # 5. 檢查當前狀態
+          echo "📊 當前 Git 狀態："
+          git status
 
       - name: 提交代碼修復
         if: steps.check-changes.outputs.has_changes == 'true' && github.event_name != 'pull_request'
         run: |
           BRANCH="fix/code-quality-auto-fix"
-          if git diff --staged --quiet; then
-            echo "ℹ️ 無暫存變更，跳過提交"
+          
+          # 檢查是否有未追蹤的修改
+          if git status --porcelain | grep -q .; then
+            echo "📝 發現代碼變更，準備提交..."
+            
+            # 暫存所有變更
+            git add -A || true
+            
+            # 檢查是否有暫存的變更
+            if git diff --cached --quiet; then
+              echo "ℹ️ 無待提交的變更"
+            else
+              echo "✅ 提交代碼修復..."
+              git commit -m "fix(code-quality): 自動修復 ESLint 和 Prettier 問題
+
+由 GitHub Actions 自動修復
+觸發分支：${{ github.ref_name }}
+觸發時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')" || true
+              
+              # 推送代碼
+              git push origin "$BRANCH" --force-with-lease || git push origin "$BRANCH" --force
+              echo "✅ 代碼修復已推送到分支 $BRANCH"
+            fi
           else
-            git commit -m "fix(code-quality): 自動修復 ESLint 和 Prettier 問題
-
-          由 GitHub Actions 自動修復
-          觸發分支：${{ github.ref_name }}
-          觸發時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-
-            git push origin "$BRANCH" --force
-            echo "✅ 代碼修復已推送到分支 $BRANCH"
+            echo "ℹ️ 無代碼變更需要提交"
           fi
 
       - name: 創建代碼質量修復 PR
@@ -142,20 +176,20 @@ jobs:
               title: 'fix(code-quality): 自動修復 ESLint 和 Prettier 問題',
               body: `## 🔧 代碼質量自動修復
 
-            此 PR 由 GitHub Actions 自動生成，包含 ESLint 和 Prettier 自動修復的代碼變更。
+此 PR 由 GitHub Actions 自動生成，包含 ESLint 和 Prettier 自動修復的代碼變更。
 
-            ### 修復內容
-            - 🔍 ESLint 自動修復可修復的代碼問題
-            - 🎨 Prettier 統一代碼格式
+### 修復內容
+- 🔍 ESLint 自動修復可修復的代碼問題
+- 🎨 Prettier 統一代碼格式
 
-            ### 觸發信息
-            - 觸發分支：\`${base}\`
-            - 觸發時間：${new Date().toISOString()}
+### 觸發信息
+- 觸發分支：\`${base}\`
+- 觸發時間：${new Date().toISOString()}
 
-            ### 驗證步驟
-            - [ ] 確認修復後代碼邏輯正確
-            - [ ] 確認測試通過
-            `,
+### 驗證步驟
+- [ ] 確認修復後代碼邏輯正確
+- [ ] 確認測試通過
+`,
               head: branch,
               base: base
             });
