@@ -56,13 +56,24 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const pr = github.context.payload.pull_request;
-            if (pr.draft) {
-              core.setOutput("is_draft", true);
-              console.log(`此 PR 是草稿狀態: #${pr.number}`);
-            } else {
+            try {
+              const pr = github.context.payload?.pull_request;
+              if (!pr) {
+                console.log('⚠️ 不是 PR 事件，設定 is_draft 為 false');
+                core.setOutput("is_draft", false);
+                return;
+              }
+              
+              if (pr.draft) {
+                core.setOutput("is_draft", true);
+                console.log(`此 PR 是草稿狀態: #${pr.number}`);
+              } else {
+                core.setOutput("is_draft", false);
+                console.log(`此 PR 非草稿，準備執行測試: #${pr.number}`);
+              }
+            } catch (error) {
+              console.error(`檢查草稿狀態時出錯：${error.message}`);
               core.setOutput("is_draft", false);
-              console.log(`此 PR 非草稿，準備執行測試: #${pr.number}`);
             }
 
       - name: 結束如果是草稿 PR
@@ -129,7 +140,7 @@ jobs:
     name: 評論測試結果
     needs: test-and-lint
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request != null
 
     steps:
       # 步驟 6：在 PR 中評論測試結果
@@ -137,56 +148,67 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const lintStatus = '${{ needs.test-and-lint.outputs.lint_status }}';
-            const testStatus = '${{ needs.test-and-lint.outputs.test_status }}';
-            const lintOutput = `${{ needs.test-and-lint.outputs.lint_output }}`;
-            const testOutput = `${{ needs.test-and-lint.outputs.test_output }}`;
+            try {
+              const lintStatus = '${{ needs.test-and-lint.outputs.lint_status }}';
+              const testStatus = '${{ needs.test-and-lint.outputs.test_status }}';
+              const lintOutput = `${{ needs.test-and-lint.outputs.lint_output }}`;
+              const testOutput = `${{ needs.test-and-lint.outputs.test_output }}`;
 
-            const lintEmoji = lintStatus === 'success' ? '✅' : '❌';
-            const testEmoji = testStatus === 'success' ? '✅' : '❌';
-            const overallStatus = (lintStatus === 'success' && testStatus === 'success') ? '✅ 全部通過' : '❌ 存在失敗';
+              const lintEmoji = lintStatus === 'success' ? '✅' : '❌';
+              const testEmoji = testStatus === 'success' ? '✅' : '❌';
+              const overallStatus = (lintStatus === 'success' && testStatus === 'success') ? '✅ 全部通過' : '❌ 存在失敗';
 
-            const body = `## 🤖 自動測試結果
+              const body = `## 🤖 自動測試結果
 
-            | 檢查項目 | 狀態 |
-            |---------|------|
-            | ESLint 代碼質量 | ${lintEmoji} ${lintStatus === 'success' ? '通過' : '失敗'} |
-            | 單元測試 | ${testEmoji} ${testStatus === 'success' ? '通過' : '失敗'} |
-            | **總體結果** | **${overallStatus}** |
+              | 檢查項目 | 狀態 |
+              |---------|------|
+              | ESLint 代碼質量 | ${lintEmoji} ${lintStatus === 'success' ? '通過' : '失敗'} |
+              | 單元測試 | ${testEmoji} ${testStatus === 'success' ? '通過' : '失敗'} |
+              | **總體結果** | **${overallStatus}** |
 
-            ${lintStatus !== 'success' ? `### ESLint 輸出\n\`\`\`\n${lintOutput}\n\`\`\`` : ''}
-            ${testStatus !== 'success' ? `### 測試輸出\n\`\`\`\n${testOutput}\n\`\`\`` : ''}
+              ${lintStatus !== 'success' ? `### ESLint 輸出\n\`\`\`\n${lintOutput}\n\`\`\`` : ''}
+              ${testStatus !== 'success' ? `### 測試輸出\n\`\`\`\n${testOutput}\n\`\`\`` : ''}
 
-            ---
-            *由 GitHub Actions 自動生成 · ${new Date().toISOString()}*`;
+              ---
+              *由 GitHub Actions 自動生成 · ${new Date().toISOString()}*`;
 
-            // 查找已有的 bot 評論並更新，避免重複評論
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
+              // 檢查是否為有效的 PR
+              if (!context.issue?.number) {
+                console.log('⚠️ 無效的 PR context，跳過評論');
+                return;
+              }
 
-            const botComment = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('🤖 自動測試結果')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
+              // 查找已有的 bot 評論並更新，避免重複評論
+              const { data: comments } = await github.rest.issues.listComments({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
+                issue_number: context.issue.number
               });
-              console.log('✅ 已更新測試結果評論');
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
-              console.log('✅ 已創建測試結果評論');
+
+              const botComment = comments.find(c =>
+                c.user.type === 'Bot' && c.body.includes('🤖 自動測試結果')
+              );
+
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: body
+                });
+                console.log('✅ 已更新測試結果評論');
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: body
+                });
+                console.log('✅ 已創建測試結果評論');
+              }
+            } catch (error) {
+              console.error(`評論時出錯：${error.message}`);
+              // 不中斷工作流，僅記錄錯誤
             }
 
   auto-merge:
@@ -195,6 +217,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'pull_request' &&
+      github.event.pull_request != null &&
       needs.test-and-lint.outputs.lint_status == 'success' &&
       needs.test-and-lint.outputs.test_status == 'success'
 
@@ -204,58 +227,68 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const prNumber = context.issue.number;
-
-            // 獲取 PR 詳情
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber
-            });
-
-            // 確認 PR 仍然開放
-            if (pr.state !== 'open') {
-              console.log(`ℹ️ PR #${prNumber} 已不是開放狀態（當前：${pr.state}），跳過合併`);
-              return;
-            }
-
-            // 確認 PR 可合併（mergeable 為 null 時表示 GitHub 仍在計算，視為無法合併）
-            if (pr.mergeable === null) {
-              console.log(`ℹ️ PR #${prNumber} 的可合併狀態尚未計算完成，跳過自動合併`);
-              return;
-            }
-            if (!pr.mergeable) {
-              console.log(`⚠️ PR #${prNumber} 存在衝突，無法自動合併`);
-
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: `## ⚠️ 自動合併失敗
-
-            測試雖然通過，但 PR 存在合併衝突，無法自動合併。
-            請手動解決衝突後重新嘗試。`
-              });
-              return;
-            }
-
-            // 執行 squash 合併
             try {
-              await github.rest.pulls.merge({
+              const prNumber = context.issue?.number;
+
+              if (!prNumber) {
+                console.log('⚠️ 無效的 PR number，跳過合併');
+                return;
+              }
+
+              // 獲取 PR 詳情
+              const { data: pr } = await github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: prNumber,
-                merge_method: 'squash',
-                commit_title: `${pr.title} (#${prNumber})`,
-                commit_message: `由 GitHub Actions 自動合併（squash）
-
-            PR：#${prNumber}
-            作者：@${pr.user.login}
-            合併時間：${new Date().toISOString()}`
+                pull_number: prNumber
               });
 
-              console.log(`✅ PR #${prNumber} 已成功 squash 合併`);
+              // 確認 PR 仍然開放
+              if (pr.state !== 'open') {
+                console.log(`ℹ️ PR #${prNumber} 已不是開放狀態（當前：${pr.state}），跳過合併`);
+                return;
+              }
+
+              // 確認 PR 可合併（mergeable 為 null 時表示 GitHub 仍在計算，視為無法合併）
+              if (pr.mergeable === null) {
+                console.log(`ℹ️ PR #${prNumber} 的可合併狀態尚未計算完成，跳過自動合併`);
+                return;
+              }
+              if (!pr.mergeable) {
+                console.log(`⚠️ PR #${prNumber} 存在衝突，無法自動合併`);
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `## ⚠️ 自動合併失敗
+
+              測試雖然通過，但 PR 存在合併衝突，無法自動合併。
+              請手動解決衝突後重新嘗試。`
+                });
+                return;
+              }
+
+              // 執行 squash 合併
+              try {
+                await github.rest.pulls.merge({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  merge_method: 'squash',
+                  commit_title: `${pr.title} (#${prNumber})`,
+                  commit_message: `由 GitHub Actions 自動合併（squash）
+
+              PR：#${prNumber}
+              作者：@${pr.user.login}
+              合併時間：${new Date().toISOString()}`
+                });
+
+                console.log(`✅ PR #${prNumber} 已成功 squash 合併`);
+              } catch (error) {
+                console.error(`❌ 合併失敗：${error.message}`);
+                throw error;
+              }
             } catch (error) {
-              console.error(`❌ 合併失敗：${error.message}`);
-              throw error;
+              console.error(`自動合併流程出錯：${error.message}`);
+              // 不中斷工作流，僅記錄錯誤
             }
