@@ -1,0 +1,246 @@
+# 自動版本檢測與更新工作流
+# 自動檢測 package.json 版本，檢查 npm 遠端版本
+# 如有新版本可用，自動更新並創建 PR
+
+name: 自動版本檢測與更新
+
+on:
+  schedule:
+    # 每天上午 6:00 UTC 檢查
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'package.json'
+      - '.github/workflows/auto-version-update.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  detect-versions:
+    name: 檢測並更新版本
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: ['22']
+
+    steps:
+      - name: 📥 檢出代碼
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 設置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: 📦 安裝依賴
+        run: npm ci
+
+      - name: 🔍 檢測當前版本
+        id: current-version
+        run: |
+          CURRENT_VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "✅ 當前版本: $CURRENT_VERSION"
+
+      - name: 🌐 檢查 NPM 遠端版本
+        id: npm-version
+        run: |
+          echo "獲取遠端 NPM 版本..."
+          PACKAGE_NAME=$(node -e "console.log(require('./package.json').name)")
+          
+          # 嘗試獲取 NPM 遠端版本
+          LATEST_VERSION=$(npm view "$PACKAGE_NAME" version 2>/dev/null || echo "")
+          
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "ℹ️ 未找到 NPM 遠端版本（可能是本地私有包）"
+            echo "has_remote=false" >> "$GITHUB_OUTPUT"
+            echo "latest_version=local" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+            echo "has_remote=true" >> "$GITHUB_OUTPUT"
+            echo "✅ NPM 遠端版本: $LATEST_VERSION"
+          fi
+
+      - name: 📊 比較版本
+        id: compare
+        run: |
+          CURRENT="${{ steps.current-version.outputs.version }}"
+          LATEST="${{ steps.npm-version.outputs.latest_version }}"
+          
+          echo "當前版本: $CURRENT"
+          echo "最新版本: $LATEST"
+          
+          # 版本比較邏輯
+          if [ "$LATEST" = "local" ]; then
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ 本地私有包，無需檢查遠端版本"
+          elif [ "$CURRENT" = "$LATEST" ]; then
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+            echo "✅ 版本已是最新"
+          else
+            # 簡單的版本比較（主要.次要.修復版本）
+            CURRENT_MAJOR=$(echo $CURRENT | cut -d. -f1)
+            LATEST_MAJOR=$(echo $LATEST | cut -d. -f1)
+            
+            if [ "$LATEST_MAJOR" -gt "$CURRENT_MAJOR" ]; then
+              echo "needs_update=true" >> "$GITHUB_OUTPUT"
+              echo "update_type=major" >> "$GITHUB_OUTPUT"
+              echo "🔴 檢測到主要版本更新: $CURRENT → $LATEST"
+            else
+              CURRENT_MINOR=$(echo $CURRENT | cut -d. -f2)
+              LATEST_MINOR=$(echo $LATEST | cut -d. -f2)
+              
+              if [ "$LATEST_MINOR" -gt "$CURRENT_MINOR" ]; then
+                echo "needs_update=true" >> "$GITHUB_OUTPUT"
+                echo "update_type=minor" >> "$GITHUB_OUTPUT"
+                echo "🟡 檢測到次要版本更新: $CURRENT → $LATEST"
+              else
+                echo "needs_update=false" >> "$GITHUB_OUTPUT"
+                echo "✅ 無需更新版本"
+              fi
+            fi
+          fi
+
+      - name: 🔧 更新版本
+        if: steps.compare.outputs.needs_update == 'true'
+        id: update-version
+        run: |
+          CURRENT="${{ steps.current-version.outputs.version }}"
+          LATEST="${{ steps.npm-version.outputs.latest_version }}"
+          
+          echo "準備更新版本: $CURRENT → $LATEST"
+          
+          # 更新 package.json
+          npm version $LATEST --no-git-tag-version
+          
+          echo "✅ 版本已更新到 $LATEST"
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: ⚙️ 配置 Git
+        if: steps.update-version.outputs.updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 🌿 創建版本更新分支
+        if: steps.update-version.outputs.updated == 'true'
+        id: create-branch
+        run: |
+          BRANCH_NAME="release/v${{ steps.npm-version.outputs.latest_version }}"
+          
+          # 清理分支名稱中的特殊字符
+          BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
+          
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+          
+          # 檢查分支是否存在
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
+            git fetch origin "$BRANCH_NAME"
+            git checkout "$BRANCH_NAME"
+            echo "✅ 切換到現有分支: $BRANCH_NAME"
+          else
+            git checkout -b "$BRANCH_NAME"
+            echo "✅ 創建新分支: $BRANCH_NAME"
+          fi
+
+      - name: 📝 提交版本更新
+        if: steps.update-version.outputs.updated == 'true'
+        run: |
+          BRANCH_NAME="${{ steps.create-branch.outputs.branch_name }}"
+          LATEST="${{ steps.npm-version.outputs.latest_version }}"
+          UPDATE_TYPE="${{ steps.compare.outputs.update_type }}"
+          
+          git add package.json package-lock.json || true
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(release): 自動更新版本至 $LATEST
+
+            更新類型: $UPDATE_TYPE
+            由 GitHub Actions 自動執行
+            時間: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            
+            git push origin "$BRANCH_NAME" --force-with-lease || git push origin "$BRANCH_NAME" --force
+            echo "✅ 版本更新已推送"
+          else
+            echo "ℹ️ 無文件變更"
+          fi
+
+      - name: 🔗 創建版本更新 PR
+        if: steps.update-version.outputs.updated == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const branch = '${{ steps.create-branch.outputs.branch_name }}';
+              const base = 'main';
+              const version = '${{ steps.npm-version.outputs.latest_version }}';
+              const updateType = '${{ steps.compare.outputs.update_type }}';
+
+              // 檢查是否已有開放的 PR
+              const { data: existingPRs } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head: `${context.repo.owner}:${branch}`,
+                base: base,
+                state: 'open'
+              });
+
+              if (existingPRs.length > 0) {
+                console.log(`ℹ️ PR 已存在：#${existingPRs[0].number}`);
+                return;
+              }
+
+              // 創建新的 PR
+              const { data: pr } = await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `chore(release): 自動更新版本至 ${version} (${updateType})`,
+                body: `## 📦 版本更新
+
+                此 PR 由 GitHub Actions 自動生成，用於更新應用版本。
+
+                ### 更新詳情
+                - **新版本**: \`${version}\`
+                - **更新類型**: \`${updateType}\`
+                - **自動觸發**: 每日版本檢測工作流
+
+                ### 驗證清單
+                - [ ] 確認 CHANGELOG.md 已更新
+                - [ ] 確認測試通過
+                - [ ] 確認構建成功
+                - [ ] 確認文檔已更新
+
+                ---
+                *由 GitHub Actions 自動生成 · ${new Date().toISOString()}*
+                `,
+                head: branch,
+                base: base,
+                labels: ['automated', 'release', updateType]
+              });
+
+              console.log(`✅ PR 已創建: #${pr.number} - ${pr.html_url}`);
+            } catch (error) {
+              console.error(`❌ 創建 PR 失敗: ${error.message}`);
+            }
+
+      - name: 📊 工作流總結
+        if: always()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📊 版本檢測工作流完成"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "當前版本: ${{ steps.current-version.outputs.version }}"
+          echo "遠端版本: ${{ steps.npm-version.outputs.latest_version }}"
+          echo "需要更新: ${{ steps.compare.outputs.needs_update }}"
+          echo "更新類型: ${{ steps.compare.outputs.update_type }}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
