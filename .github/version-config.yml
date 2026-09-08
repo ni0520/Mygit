@@ -1,0 +1,105 @@
+# 版本檢測配置文件
+# 為不同倉庫定義自動版本檢測和更新的規則
+
+version: '1.0'
+
+# 全局配置
+global:
+  enabled: true
+  check_interval: 'daily'  # daily, weekly, monthly
+  auto_create_pr: true
+  auto_merge_on_test_pass: true
+  
+  # 版本比較規則
+  version_compare:
+    major_version_enabled: true
+    minor_version_enabled: true
+    patch_version_enabled: false
+
+# 倉庫特定配置
+repositories:
+  - name: 'Mygit'
+    owner: 'ni0520'
+    type: 'nodejs'
+    enabled: true
+    
+    # 檢查設置
+    check_settings:
+      interval: 'daily'
+      time: '06:00'  # UTC
+      days: ['mon', 'tue', 'wed', 'thu', 'fri']
+    
+    # 版本策略
+    version_policy:
+      update_major: true
+      update_minor: true
+      update_patch: false
+      max_version_jumps: 2  # 最多跳過多少個版本
+      
+    # 依賴管理
+    dependencies:
+      check_npm: true
+      check_pip: false
+      check_maven: false
+      auto_update_lock_files: true
+      
+    # PR 配置
+    pr_config:
+      create_pr: true
+      target_branch: 'main'
+      labels: ['automated', 'release']
+      auto_assign_reviewers: false
+      reviewers: []
+      
+    # 測試設置
+    test_config:
+      run_tests: true
+      required_tests: ['npm test', 'npm run lint']
+      auto_merge_on_pass: false
+
+  # 可添加更多倉庫配置
+  # - name: 'another-repo'
+  #   owner: 'username'
+  #   type: 'python'
+  #   enabled: true
+  #   ...
+
+# 版本檢測映射
+version_sources:
+  nodejs:
+    main: 'package.json'
+    lock_file: 'package-lock.json'
+    version_field: 'version'
+    remote_registry: 'npm'
+    
+  python:
+    main: 'setup.py'
+    lock_file: 'requirements.txt'
+    version_field: 'version'
+    remote_registry: 'pypi'
+    
+  java:
+    main: 'pom.xml'
+    lock_file: null
+    version_field: 'version'
+    remote_registry: 'maven'
+
+# 通知配置
+notifications:
+  enabled: true
+  channels:
+    - type: 'github_issue'
+      enabled: true
+    - type: 'email'
+      enabled: false
+      recipients: []
+    - type: 'slack'
+      enabled: false
+      webhook_url: ''
+
+# 日誌配置
+logging:
+  level: 'info'
+  verbose: false
+  save_logs: true
+  log_path: '.github/logs/version-check'
