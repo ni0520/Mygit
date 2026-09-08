@@ -1,5 +1,5 @@
-# 自動分支同步工作流 - 簡化版本
-# 採用最基礎的 bash 邏輯，確保最高可靠性
+# 自動分支同步工作流 - 增強版本
+# 採用可靠的 bash 邏輯，支持衝突處理和詳細報告
 
 name: 自動分支同步
 
@@ -55,6 +55,7 @@ jobs:
           echo "✅ develop 分支已創建"
 
       - name: 🔀 合併 main 到 develop
+        id: merge
         run: |
           echo "準備合併 main 到 develop..."
           
@@ -63,46 +64,113 @@ jobs:
           echo "已切換到 develop 分支"
           
           # 拉取最新內容
-          git pull origin develop --verbose
+          git pull origin develop --verbose || true
           echo "已拉取最新 develop 內容"
           
           # 嘗試合併
           echo "開始合併 main..."
-          if git merge origin/main -m "chore(sync): 自動同步 main 到 develop"; then
+          if git merge origin/main -m "chore(sync): 自動同步 main 到 develop" 2>&1; then
             echo "✅ 合併成功"
-            
-            # 推送到遠端
-            echo "正在推送到遠端..."
-            git push origin develop -v
-            echo "✅ 推送成功"
-            
-            # 標記成功
+            echo "merge_success=true" >> "$GITHUB_OUTPUT"
             echo "MERGE_SUCCESS=true" >> "$GITHUB_ENV"
           else
-            echo "⚠️ 合併失敗（可能是衝突）"
-            git merge --abort
+            echo "⚠️ 合併失敗，檢查衝突..."
+            echo "merge_success=false" >> "$GITHUB_OUTPUT"
             echo "MERGE_SUCCESS=false" >> "$GITHUB_ENV"
+            
+            # 保存衝突信息
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt || true
+            echo "衝突文件："
+            cat /tmp/conflicts.txt || echo "無法獲取衝突文件列表"
+            
+            # 中止合併
+            git merge --abort || true
           fi
 
-      - name: 📊 輸出結果
+      - name: 📊 推送結果
+        if: env.MERGE_SUCCESS == 'true'
+        run: |
+          echo "正在推送到遠端..."
+          git push origin develop -v
+          echo "✅ 推送成功"
+
+      - name: ⚠️ 處理衝突
+        if: env.MERGE_SUCCESS == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const { data: pullRequests } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                head: `${context.repo.owner}:main`,
+                base: 'develop'
+              });
+
+              if (pullRequests.length > 0) {
+                console.log(`ℹ️ 已存在 PR，無需重複建立`);
+                return;
+              }
+
+              // 創建 issue 報告衝突
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '⚠️ 分支同步失敗 - 需要手動解決衝突',
+                body: `## 分支同步失敗報告
+
+              ### 問題
+              自動同步 main 到 develop 時發生合併衝突。
+
+              ### 原因
+              develop 分支包含與 main 分支不兼容的變更。
+
+              ### 解決方案
+              1. 本地檢出 develop 分支
+              2. 手動解決衝突
+              3. 測試變更
+              4. 推送解決後的分支
+
+              ### 命令
+              \`\`\`bash
+              git checkout develop
+              git pull origin develop
+              git merge origin/main
+              # 手動解決衝突文件
+              git add .
+              git commit -m "chore(sync): 解決分支同步衝突"
+              git push origin develop
+              \`\`\`
+
+              **觸發時間**: ${new Date().toISOString()}
+              **工作流**: 自動分支同步
+              `,
+                labels: ['sync-conflict', 'urgent']
+              });
+
+              console.log(`✅ Issue 已創建: #${issue.number}`);
+            } catch (error) {
+              console.error(`創建 Issue 失敗: ${error.message}`);
+            }
+
+      - name: 📊 工作流總結
         if: always()
         run: |
-          echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "📊 分支同步完成"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
           
           if [ "$MERGE_SUCCESS" = "true" ]; then
-            echo ""
             echo "✅ 狀態：同步成功"
             echo "📍 已將 main 同步到 develop"
             echo "⏰ 完成時間：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            echo ""
           else
-            echo ""
-            echo "⚠️ 狀態：同步失敗或發生衝突"
-            echo "👉 需要手動解決"
-            echo ""
+            echo "⚠️ 狀態：同步失敗 - 檢測到衝突"
+            echo "👉 已創建 Issue，需要手動解決"
+            echo "📌 請查看 GitHub Issues 獲取詳細信息"
           fi
           
+          echo ""
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
