@@ -7,6 +7,7 @@
 ## 🆘 常見問題與解決方案
 
 ### 📋 目錄
+
 1. [安裝和設置](#安裝和設置)
 2. [運行應用程式](#運行應用程式)
 3. [測試和 Lint](#測試和-lint)
@@ -21,6 +22,7 @@
 ### ❌ 問題：npm 安裝失敗
 
 **症狀**：
+
 ```
 npm ERR! code ERESOLVE
 npm ERR! ERESOLVE unable to resolve dependency tree
@@ -45,6 +47,7 @@ npm install --legacy-peer-deps
 ### ❌ 問題：Node.js 版本不兼容
 
 **症狀**：
+
 ```
 The engine "node" is incompatible with this module
 ```
@@ -66,6 +69,7 @@ node --version  # 應該顯示 v20.x.x
 ### ❌ 問題：缺少環境變數
 
 **症狀**：
+
 ```
 Error: PORT must be defined in .env file
 ```
@@ -92,6 +96,7 @@ npm run dev
 ### ❌ 問題：端口已被占用
 
 **症狀**：
+
 ```
 Error: listen EADDRINUSE :::3000
 Port 3000 is already in use
@@ -125,6 +130,7 @@ const port = process.env.PORT || 8080;
 ### ❌ 問題：應用程式無法啟動
 
 **症狀**：
+
 ```
 Cannot find module './haikus.json'
 ```
@@ -146,6 +152,7 @@ const haikus = require('./haikus.json');
 ### ❌ 問題：頁面無法渲染
 
 **症狀**：
+
 ```
 Error: Cannot find module './views/index.ejs'
 ```
@@ -170,6 +177,7 @@ grep -A2 "view engine" index.js
 ### ❌ 問題：測試失敗
 
 **症狀**：
+
 ```
 Error: Test failed
 AssertionError: expected 'ok' to equal 'undefined'
@@ -196,6 +204,7 @@ curl http://localhost:3000/healthz
 ### ❌ 問題：ESLint 檢查失敗
 
 **症狀**：
+
 ```
 ✖ 10 problems (5 errors, 5 warnings)
 ```
@@ -218,16 +227,17 @@ cat eslint.config.js
 
 **常見 ESLint 錯誤**：
 
-| 錯誤 | 原因 | 修復 |
-|------|------|------|
-| `no-unused-vars` | 定義了但未使用的變數 | 刪除或使用變數 |
-| `no-console` | 使用 console.log | 刪除或配置例外 |
-| `semi` | 缺少分號 | 運行 `format:fix` |
-| `quotes` | 引號不一致 | 運行 `format:fix` |
+| 錯誤             | 原因                 | 修復              |
+| ---------------- | -------------------- | ----------------- |
+| `no-unused-vars` | 定義了但未使用的變數 | 刪除或使用變數    |
+| `no-console`     | 使用 console.log     | 刪除或配置例外    |
+| `semi`           | 缺少分號             | 運行 `format:fix` |
+| `quotes`         | 引號不一致           | 運行 `format:fix` |
 
 ### ❌ 問題：Prettier 格式檢查失敗
 
 **症狀**：
+
 ```
 [error] path/to/file.js: Insert `;`
 ```
@@ -253,6 +263,7 @@ npm run lint
 ### ❌ 問題：應用程式響應慢
 
 **症狀**：
+
 ```
 Response time > 1000ms
 ```
@@ -288,7 +299,7 @@ curl -w "@curl-format.txt" -o /dev/null -s http://localhost:3000/
 
 ```javascript
 // 1. 啟用快取
-app.set('view cache', true);
+app.set("view cache", true);
 
 // 2. 使用中間件快取
 const cacheMiddleware = (ttl) => {
@@ -296,16 +307,17 @@ const cacheMiddleware = (ttl) => {
 };
 
 // 3. 使用 CDN 提供靜態文件
-app.use(express.static('public', { maxAge: '1d' }));
+app.use(express.static("public", { maxAge: "1d" }));
 
 // 4. 啟用 Gzip 壓縮
-const compression = require('compression');
+const compression = require("compression");
 app.use(compression());
 ```
 
 ### ❌ 問題：內存泄漏
 
 **症狀**：
+
 ```
 應用程式內存使用不斷增長
 ```
@@ -333,6 +345,7 @@ node --inspect index.js
 ### ❌ 問題：安全漏洞警告
 
 **症狀**：
+
 ```
 npm WARN security Some packages may be vulnerable
 ```
@@ -356,6 +369,7 @@ npm update
 ### ❌ 問題：XSS 漏洞
 
 **症狀**：
+
 ```
 用戶輸入在頁面上執行 JavaScript
 ```
@@ -377,6 +391,7 @@ const clean = sanitizeHtml(userInput);
 ### ❌ 問題：CSRF 攻擊
 
 **症狀**：
+
 ```
 未授權的請求成功執行
 ```
@@ -385,12 +400,12 @@ const clean = sanitizeHtml(userInput);
 
 ```javascript
 // 確保安全中間件已啟用
-const helmet = require('helmet');
+const helmet = require("helmet");
 app.use(helmet());
 
 // 添加 CSRF 保護（POST 請求）
-const csrf = require('csurf');
-const cookieParser = require('cookie-parser');
+const csrf = require("csurf");
+const cookieParser = require("cookie-parser");
 
 app.use(cookieParser());
 app.use(csrf({ cookie: true }));
@@ -403,6 +418,7 @@ app.use(csrf({ cookie: true }));
 ### ❌ 問題：GitHub Actions 工作流失敗
 
 **症狀**：
+
 ```
 Workflow failed: "自動測試與合併"
 Error: Pull Request is still a draft
@@ -428,6 +444,7 @@ npm test
 ### ❌ 問題：自動合併失敗
 
 **症狀**：
+
 ```
 Auto-merge failed: Conflicts detected
 ```
@@ -453,6 +470,7 @@ git push origin feature-branch --force-with-lease
 ### ❌ 問題：測試超時
 
 **症狀**：
+
 ```
 Test timeout after 30000ms
 ```
@@ -461,7 +479,7 @@ Test timeout after 30000ms
 
 ```javascript
 // 增加超時時間
-test('some slow test', async (t) => {
+test("some slow test", async (t) => {
   t.timeout(60000); // 60 秒
   // 測試代碼
 });
@@ -518,13 +536,13 @@ chrome://inspect
 
 ```javascript
 // 添加詳細的日誌
-console.log('[DEBUG]', 'Message:', { data });
-console.error('[ERROR]', error.message, error.stack);
+console.log("[DEBUG]", "Message:", { data });
+console.error("[ERROR]", error.message, error.stack);
 
 // 或使用日誌庫
-const logger = require('pino')();
-logger.info({ request: req }, 'Request received');
-logger.error({ error }, 'An error occurred');
+const logger = require("pino")();
+logger.info({ request: req }, "Request received");
+logger.error({ error }, "An error occurred");
 ```
 
 ---

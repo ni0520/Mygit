@@ -24,5 +24,8 @@
     "nodemon": "^3.1.14",
     "prettier": "^3.5.2",
     "supertest": "^7.0.0"
+  },
+  "overrides": {
+    "qs": "6.16.0"
   }
 }

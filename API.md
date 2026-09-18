@@ -1,8 +1,9 @@
-/**
- * API.md - Mygit 應用程式 API 文檔
- * 
- * 本文件詳細說明所有可用的 HTTP 端點及其使用方法
- */
+/\*\*
+
+- API.md - Mygit 應用程式 API 文檔
+-
+- 本文件詳細說明所有可用的 HTTP 端點及其使用方法
+  \*/
 
 # 🌐 Mygit API 文檔
 
@@ -51,11 +52,13 @@ Mygit 是一個展示俳句（日本傳統短詩）的 Node.js 網頁應用程�
 **說明**：返回渲染後的 HTML 俳句展示頁��
 
 **請求示例**：
+
 ```bash
 curl http://localhost:3000/
 ```
 
 **響應**：
+
 ```html
 <!DOCTYPE html>
 <html>
@@ -70,10 +73,12 @@ curl http://localhost:3000/
 ```
 
 **狀態碼**：
+
 - `200` - 成功返回頁面
 - `500` - 伺服器錯誤
 
 **性能指標**：
+
 - 平均響應時間：50-150ms
 - 緩存策略：靜態文件快取 1 天
 
@@ -86,11 +91,13 @@ curl http://localhost:3000/
 **說明**：檢查應用程式的運行狀態。用於負載平衡器、監控系統和 Kubernetes 健康檢查。
 
 **請求示例**：
+
 ```bash
 curl http://localhost:3000/healthz
 ```
 
 **成功響應**：
+
 ```json
 {
   "status": "ok"
@@ -98,10 +105,12 @@ curl http://localhost:3000/healthz
 ```
 
 **狀態碼**：
+
 - `200` - 應用程式運行正常
 - `503` - 應用程式不健康（資源不足、數據庫連接失敗等）
 
 **快取**：
+
 - 緩存時長：10 秒
 - 適用場景：減少健康檢查頻率
 
@@ -130,11 +139,13 @@ livenessProbe:
 **說明**：當請求的路由不存在時返回
 
 **請求示例**：
+
 ```bash
 curl http://localhost:3000/invalid-path
 ```
 
 **響應**：
+
 ```json
 {
   "error": "not_found"
@@ -142,6 +153,7 @@ curl http://localhost:3000/invalid-path
 ```
 
 **狀態碼**：
+
 - `404` - 資源不存在
 
 ---
@@ -195,12 +207,12 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 ### 常見錯誤碼
 
-| 錯誤碼 | HTTP 狀態 | 說明 |
-|-------|---------|------|
-| `not_found` | 404 | 請求的資源不存在 |
-| `internal_server_error` | 500 | 伺服器內部錯誤 |
-| `unauthorized` | 401 | 未授權（未來功能） |
-| `forbidden` | 403 | 禁止訪問（未來功能） |
+| 錯誤碼                  | HTTP 狀態 | 說明                 |
+| ----------------------- | --------- | -------------------- |
+| `not_found`             | 404       | 請求的資源不存在     |
+| `internal_server_error` | 500       | 伺服器內部錯誤       |
+| `unauthorized`          | 401       | 未授權（未來功能）   |
+| `forbidden`             | 403       | 禁止訪問（未來功能） |
 
 ### 錯誤日誌
 
@@ -236,14 +248,14 @@ curl -s http://localhost:3000/healthz | jq .
 # 每 30 秒檢查一次
 while true; do
   RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/healthz)
-  
+
   if [ "$RESPONSE" = "200" ]; then
     echo "[$(date)] ✅ 服務正常"
   else
     echo "[$(date)] ❌ 服務異常 (HTTP $RESPONSE)"
     # 發送告警
   fi
-  
+
   sleep 30
 done
 ```
@@ -254,16 +266,16 @@ done
 // 檢查應用程式狀態
 async function checkHealth() {
   try {
-    const response = await fetch('http://localhost:3000/healthz');
+    const response = await fetch("http://localhost:3000/healthz");
     const data = await response.json();
-    
+
     if (response.ok) {
-      console.log('✅ 服務運行正常:', data.status);
+      console.log("✅ 服務運行正常:", data.status);
     } else {
-      console.log('❌ 服務異常');
+      console.log("❌ 服務異常");
     }
   } catch (error) {
-    console.error('❌ 無法連接到服務:', error);
+    console.error("❌ 無法連接到服務:", error);
   }
 }
 
@@ -280,7 +292,7 @@ def check_health():
     try:
         response = requests.get('http://localhost:3000/healthz', timeout=5)
         data = response.json()
-        
+
         if response.status_code == 200:
             print(f'✅ Service OK: {data["status"]}')
         else:
@@ -297,15 +309,15 @@ check_health()
 
 完整的 HTTP 狀態碼參考：
 
-| 狀態碼 | 含義 | 說明 |
-|-------|------|------|
-| **2xx** | **成功** | |
-| 200 | OK | 請求成功 |
-| **4xx** | **客戶端錯誤** | |
-| 404 | Not Found | 資源不存在 |
-| **5xx** | **伺服器錯誤** | |
-| 500 | Internal Server Error | 伺服器錯誤 |
-| 503 | Service Unavailable | 服務不可用 |
+| 狀態碼  | 含義                  | 說明       |
+| ------- | --------------------- | ---------- |
+| **2xx** | **成功**              |            |
+| 200     | OK                    | 請求成功   |
+| **4xx** | **客戶端錯誤**        |            |
+| 404     | Not Found             | 資源不存在 |
+| **5xx** | **伺服器錯誤**        |            |
+| 500     | Internal Server Error | 伺服器錯誤 |
+| 503     | Service Unavailable   | 服務不可用 |
 
 ---
 
@@ -313,10 +325,10 @@ check_health()
 
 ### 響應時間目標
 
-| 端點 | P50 | P95 | P99 |
-|------|-----|-----|-----|
-| `/` | 50ms | 150ms | 300ms |
-| `/healthz` | 5ms | 20ms | 50ms |
+| 端點       | P50  | P95   | P99   |
+| ---------- | ---- | ----- | ----- |
+| `/`        | 50ms | 150ms | 300ms |
+| `/healthz` | 5ms  | 20ms  | 50ms  |
 
 ### 優化建議
 
